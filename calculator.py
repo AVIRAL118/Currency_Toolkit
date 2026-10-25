@@ -19,6 +19,7 @@ import requests
 
 ENGINE_TIMEOUT = 3.0  # seconds to wait for one engine reply
 RATE_TTL = 300        # seconds a fetched rate table is reused (per source currency)
+TEMP_VAR_PREFIX = "__tmp"
 RATE_API_URLS = (
     "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/{}.json",
     "https://latest.currency-api.pages.dev/v1/currencies/{}.json",  # fallback mirror
@@ -42,11 +43,14 @@ CODE_TO_SYMBOL = {
 
 # ---------------------------------------------------------------- patterns
 _NUM = r'(?:\d+(?:\.\d*)?|\.\d+)'
+_NUM_EXP = rf'{_NUM}(?:[eE][+-]?\d+)?'      # allows 5e3, 1.5E-2, etc. (money literals only)
 _SYMBOLS = '|'.join(re.escape(s) for s in sorted(SYMBOL_TO_CODE, key=len, reverse=True))
 _CODES = '|'.join(CODE_TO_SYMBOL)
 
-MONEY_PREFIX_RE = re.compile(rf'({_SYMBOLS}|{_CODES})\s*([+-]?{_NUM})', re.I)   # $5, CAD$5, EUR 5
-MONEY_SUFFIX_RE = re.compile(rf'([+-]?{_NUM})\s*({_CODES})', re.I)              # 5 EUR
+MONEY_PREFIX_RE = re.compile(
+    rf'(?<![\w])({_SYMBOLS}|{_CODES})\s*([+-]?{_NUM_EXP})(?![\w])', re.I | re.A)   # $5, CAD$5, EUR 5
+MONEY_SUFFIX_RE = re.compile(
+    rf'(?<![\w.])([+-]?{_NUM_EXP})\s*({_CODES})(?![\w])', re.I | re.A)              # 5 EUR
 PLAIN_NUM_RE = re.compile(rf'[+-]?{_NUM}(?:[eE][+-]?\d+)?')
 CONVERT_RE = re.compile(rf'convert\s+([A-Za-z_]\w*)\s+to\s+({_SYMBOLS}|[A-Za-z]{{3}})', re.I | re.A)
 ASSIGN_RE = re.compile(r'([A-Za-z_]\w*)\s*=\s*(.*)', re.A)
@@ -231,7 +235,7 @@ class CurrencyCalculatorREPL:
         elif m := ASSIGN_RE.fullmatch(line):           # price1 = $500
             self.assign(*m.groups())
         else:                                          # arithmetic expression
-            self.show_result(self.ask(f"EVAL {line}"))
+            self.eval_expression(line)
         return True
 
     def assign(self, name, text):
@@ -241,13 +245,21 @@ class CurrencyCalculatorREPL:
         elif PLAIN_NUM_RE.fullmatch(text):
             code, num = None, text
         else:  # expression: evaluate first, then store the result
-            reply = self.ask(f"EVAL {text}")
+            processed = self.prepare_expression(text)
+            if processed is None:
+                return
+            reply = self.ask(f"EVAL {processed}")
             if not (parsed := parse_ok_value(reply)):
                 self.show_result(reply)
                 return
             num, code = parsed
         cmd = f"SET {name} {code}{num}" if code else f"SETN {name} {num}"
         self.show_result(self.ask(cmd))
+    
+    def eval_expression(self, expr):
+        processed = self.prepare_expression(expr)
+        if processed is not None:
+            self.show_result(self.ask(f"EVAL {processed}"))
 
     def convert(self, var_name, target_spec):
         target = resolve_currency(target_spec)
@@ -277,6 +289,45 @@ class CurrencyCalculatorREPL:
             return
         self.show_result(self.ask(f"CONVERT {var_name} {target}"))
 
+    def prepare_expression(self, expr):
+        """Rewrite money literals in a raw expression as temp-variable references.
+
+        'price1 + CAD250'  ->  'price1 + __tmp0'   (after SET __tmp0 CAD250)
+        '5 EUR - 2'        ->  '__tmp0 - 2'        (after SET __tmp0 EUR5)
+
+        Returns the rewritten expression, or None if a temp var could not be
+        created (in which case the engine's error has already been printed).
+        """
+        counter = 0
+        failed = []
+
+        def make_temp(code, num):
+            nonlocal counter
+            name = f"{TEMP_VAR_PREFIX}{counter}"
+            counter += 1
+            reply = self.ask(f"SET {name} {code}{num}" if code else f"SETN {name} {num}")
+            if not reply.startswith("OK"):
+                failed.append(reply)
+            return name
+
+        def sub_prefix(m):
+            spec, num = m.groups()
+            return make_temp(resolve_currency(spec), num)
+
+        def sub_suffix(m):
+            num, spec = m.groups()
+            return make_temp(resolve_currency(spec), num)
+
+        # Prefix form first ($5, CAD$5, EUR 5), then suffix form (5 EUR) on what remains.
+        rewritten = MONEY_PREFIX_RE.sub(sub_prefix, expr)
+        if failed:
+            self.show_result(failed[0])
+            return None
+        rewritten = MONEY_SUFFIX_RE.sub(sub_suffix, rewritten)
+        if failed:
+            self.show_result(failed[0])
+            return None
+        return rewritten
     # -- exchange rates -------------------------------------------------
     def get_rate(self, source, target):
         """Live rate source->target. One API call covers every target for that source."""
@@ -321,7 +372,8 @@ class CurrencyCalculatorREPL:
         if not reply.startswith("VARLIST"):
             self.show_result(reply)
             return
-        items = reply.split()[1:]
+        items = [it for it in reply.split()[1:]
+                 if not it.partition("=")[0].startswith(TEMP_VAR_PREFIX)]
         if not items:
             print("📦 Stored Variables: (None)")
             return
@@ -330,7 +382,6 @@ class CurrencyCalculatorREPL:
             name, _, raw = item.partition("=")
             code, val = VAR_VALUE_RE.fullmatch(raw).groups() if raw else (None, raw)
             print(f"  • {name} = {fmt_money(val, code)}")
-
     # -- main loop ------------------------------------------------------
     def run(self):
         print("\n==================================================")
