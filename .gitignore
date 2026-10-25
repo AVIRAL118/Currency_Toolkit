@@ -1,6 +1,17 @@
-*.exe
+# Build artefacts
+engine_test
+engine_test.exe
 *.o
+*.obj
+
+# Python
 __pycache__/
-*.py[cod]
-.env
-*.vscode
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# IDE
+*.vscode/
+.idea/
+*.swp
