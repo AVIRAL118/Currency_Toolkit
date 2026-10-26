@@ -9,18 +9,27 @@ natural money-literal syntax, and process supervision.
 
 ## Architecture
 
-
-  ┌─────────────────────────┐         ┌──────────────────────────┐
-  │   Python REPL           │  stdin  │   C11 engine             │
-  │   (currency_repl.py)    │ ──────► │   (currency_engine.c)    │
-  │                         │         │                          │
-  │  • money-literal        │  stdout │  • lexer                 │
-  │    preprocessing        │ ◄────── │  • recursive-descent     │
-  │  • rate fetching        │         │    parser                │
-  │  • formatting           │         │  • typed arithmetic      │
-  │  • process supervision  │         │  • variable/rate tables  │
-  └─────────────────────────┘         └──────────────────────────┘
-```
+```text
++-----------------------------------------------------+
+|                    Python REPL                      |
+|                 (currency_repl.py)                  |
+|                                                     |
+|  • Money-literal preprocessing                      |
+|  • Live rate fetching                               |
+|  • Result formatting                                |
+|  • Process supervision                              |
++--------------------------+--------------------------+
+                           |
+             stdin/stdout  |  (line-based protocol)
+                           |
++--------------------------v--------------------------+
+|                    C11 Engine                       |
+|                 (currency_engine.c)                 |
+|                                                     |
+|  • Lexer & Recursive-descent parser                 |
+|  • Typed money arithmetic                           |
+|  • Variable and exchange-rate tables                |
++-----------------------------------------------------+
 
 ## Requirements
 
