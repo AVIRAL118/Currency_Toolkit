@@ -1,3 +1,27 @@
+here is my readme file...
+
+
+# Currency Toolkit
+
+A currency-aware expression calculator: a strict C11 engine for typed
+money arithmetic, driven by a Python REPL that adds live exchange rates,
+natural money-literal syntax, and process supervision.
+
+## Architecture
+
+
+  ┌─────────────────────────┐         ┌──────────────────────────┐
+  │   Python REPL           │  stdin  │   C11 engine             │
+  │   (currency_repl.py)    │ ──────► │   (currency_engine.c)    │
+  │                         │         │                          │
+  │  • money-literal        │  stdout │  • lexer                 │
+  │    preprocessing        │ ◄────── │  • recursive-descent     │
+  │  • rate fetching        │         │    parser                │
+  │  • formatting           │         │  • typed arithmetic      │
+  │  • process supervision  │         │  • variable/rate tables  │
+  └─────────────────────────┘         └──────────────────────────┘
+```
+
 ## Requirements
 
 ### C engine
@@ -10,31 +34,33 @@
 - `requests` (see `requirements.txt`)
 - Network access to the currency API endpoints
 
-## Install & run
+## Install & Run
+
+bash:
+python -m pip install -r requirements.txt
+python currency_repl.py
+```
+*(Note: The Python front end will automatically find your C compiler and compile `currency_engine.c` on the first run, or when the source file changes.)*
+
+## Testing
+
+The project has a unified test suite that covers the C engine internals, the Python REPL logic, and the full Python ↔ C integration.
 
 ```bash
-python -m pip install -r requirements.txt
-python calculator.py
-# Currency Toolkit
+# Install test dependencies
+python -m pip install -r requirements_dev.txt
 
-A currency-aware expression calculator: a strict C11 engine for typed
-money arithmetic, driven by a Python REPL that adds live exchange rates,
-natural money-literal syntax, and process supervision.
+# Run all tests (Python + C)
+pytest -v
+```
 
- Architecture Diagram
-  ┌─────────────────────────┐         ┌──────────────────────────┐
-│   Python REPL           │  stdin  │   C11 engine             │
-│   (currency_repl.py)    │ ──────► │   (currency_engine.c)    │
-│                         │         │                          │
-│  • money-literal        │  stdout │  • lexer                 │
-│    preprocessing        │ ◄────── │  • recursive-descent     │
-│  • rate fetching        │         │    parser                │
-│  • formatting           │         │  • typed arithmetic      │
-│  • process supervision  │         │  • variable/rate tables  │
-└─────────────────────────┘         └──────────────────────────┘
+To skip the slow integration tests (which compile and launch the C engine):
 
- Protocol_Spec_Section
- ## Engine protocol
+```bash
+pytest -v -m "not slow"
+```
+
+## Engine Protocol
 
 The Python front end and the C engine communicate over a line-oriented
 stdin/stdout protocol: one command line in, exactly one reply line out.
@@ -61,3 +87,4 @@ stdin/stdout protocol: one command line in, exactly one reply line out.
 - **Shared library / FFI:** would couple the Python and C build systems,
   make the C side harder to test in isolation, and turn every Python
   crash into a potential C crash. The protocol seam is the whole point.
+```

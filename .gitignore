@@ -1,6 +1,8 @@
 # Build artefacts
 engine_test
 engine_test.exe
+engine_tests
+engine_tests.exe
 *.o
 *.obj
 
